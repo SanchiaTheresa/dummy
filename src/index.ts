@@ -5,201 +5,150 @@ import sql from './db';
 import bcrypt from 'bcrypt';
 import { z } from 'zod';
 
-type User = {
-  id: number;
-  name: string;
-  email: string;
-  created_at: string;
-};
-
 const app = new Hono();
 
-// ================= VALIDATION HELPERS (ALL ERRORS + PATTERNS) =================
-async function validateUserCreate(body: any) {
-  const schema = z.object({
-    name: z.string().min(2, 'Name: min 2 chars').max(100, 'Name: max 100 chars'),
-    email: z.string().email({
-      message: 'Email: use format john@example.com'
-    }),
-    password: z.string().min(8, 'Password: min 8 chars').regex(
-      /^(?=.*[a-z])(?=.*[A-Z])(?=.*\d)/, 
-      'Password: 1 uppercase + 1 lowercase + 1 number (Abcdefg1)'
-    )
-  });
+// ================= TYPES =================
+type User = { id: number; name: string; email: string; created_at: string };
+type Address = { id: number; user_id: number; address_line: string | null; city: string | null; state: string | null; postal_code: string | null; country: string | null; created_at: string };
+
+// ================= VALIDATION =================
+const schemas = {
+  userCreate: z.object({
+    name: z.string().min(2).max(100),
+    email: z.string().email(),
+    password: z.string().min(8).regex(/^(?=.*[a-z])(?=.*[A-Z])(?=.*\d)/)
+  }),
+  addressCreate: z.object({
+    address_line: z.string().min(5).max(200),
+    city: z.string().min(2).max(50),
+    state: z.string().min(2).max(50),
+    postal_code: z.string().min(4).max(10),
+    country: z.string().min(2).max(50)
+  }),
+  addressUpdate: z.object({
+    address_line: z.string().min(5).max(200).optional(),
+    city: z.string().min(2).max(50).optional(),
+    state: z.string().min(2).max(50).optional(),
+    postal_code: z.string().min(4).max(10).optional(),
+    country: z.string().min(2).max(50).optional()
+  }).passthrough()
+};
+
+// ================= 1️⃣ ADD ADDRESS =================
+app.post('/users/:userId/addresses', async (c) => {
+  const userId = Number(c.req.param('userId'));
+  if (isNaN(userId) || userId <= 0) return c.json({ error: 'Invalid user ID' }, 400);
   
-  const result = schema.safeParse(body);
-  if (!result.success) {
-    const errors = result.error.issues.map((e: any) => 
-      `${e.path.join('.')} → ${e.message}`
-    );
-    throw { status: 400, message: errors.join(', ') };
-  }
-  return result.data;
-}
-
-async function validateUserUpdate(body: any) {
-  const schema = z.object({
-    name: z.string().min(2, 'Name: min 2 chars').max(100, 'Name: max 100 chars').optional(),
-    email: z.string().email({
-      message: 'Email: use format john@example.com'
-    }).optional(),
-    password: z.string().min(8, 'Password: min 8 chars').regex(
-      /^(?=.*[a-z])(?=.*[A-Z])(?=.*\d)/, 
-      'Password: 1 uppercase + 1 lowercase + 1 number (Abcdefg1)'
-    ).optional()
-  });
+  const [user] = await sql`SELECT id FROM users WHERE id = ${userId}`;
+  if (!user) return c.json({ error: 'User not found' }, 404);
   
-  const result = schema.safeParse(body);
-  if (!result.success) {
-    const errors = result.error.issues.map((e: any) => 
-      `${e.path.join('.')} → ${e.message}`
-    );
-    throw { status: 400, message: errors.join(', ') };
-  }
-  return result.data;
-}
-
-async function validateLogin(body: any) {
-  const schema = z.object({
-    email: z.string().email('Email: john@example.com'),
-    password: z.string().min(1, 'Password required')
-  });
-  
-  const result = schema.safeParse(body);
-  if (!result.success) {
-    const errors = result.error.issues.map((e: any) => 
-      `${e.path.join('.')} → ${e.message}`
-    );
-    throw { status: 400, message: errors.join(', ') };
-  }
-  return result.data;
-}
-
-// ================= ROUTES =================
-app.get('/', (c) => c.json({ message: 'Hono + Neon API ready' }));
-
-// 1. POST /users - CREATE
-app.post('/users', async (c) => {
   try {
-    const body = await validateUserCreate(await c.req.json());
-    
-    const passwordHash = await bcrypt.hash(body.password, 12);
-    
-    const rows = await sql`
-      INSERT INTO users (name, email, password_hash)
-      VALUES (${body.name}, ${body.email}, ${passwordHash})
-      RETURNING id, name, email, created_at
+    const body = schemas.addressCreate.parse(await c.req.json());
+    const [address] = await sql`
+      INSERT INTO addresses (user_id, address_line, city, state, postal_code, country)
+      VALUES (${userId}, ${body.address_line}, ${body.city}, ${body.state}, ${body.postal_code}, ${body.country})
+      RETURNING *
     `;
-    return c.json(rows[0], 201);
-  } catch (err: any) {
-    if (err.code === '23505') return c.json({ error: 'Email already exists' }, 409);
-    if (err.status) return c.json({ error: err.message }, err.status);
-    return c.json({ error: 'Failed to create user' }, 500);
+    return c.json(address, 201);
+  } catch (e) {
+    return c.json({ error: 'Invalid address data' }, 400);
   }
 });
 
-// 2. GET /users - READ ALL
-app.get('/users', async (c) => {
+// ================= 2️⃣ GET ADDRESSES =================
+app.get('/users/:userId/addresses', async (c) => {
+  const userId = Number(c.req.param('userId'));
+  if (isNaN(userId) || userId <= 0) return c.json({ error: 'Invalid user ID' }, 400);
+  
+  const [user] = await sql`SELECT id FROM users WHERE id = ${userId}`;
+  if (!user) return c.json({ error: 'User not found' }, 404);
+  
+  const addresses = await sql`SELECT * FROM addresses WHERE user_id = ${userId} ORDER BY created_at DESC`;
+  return c.json(addresses); // Empty array if none
+});
+
+// ================= 3️⃣ UPDATE ADDRESS =================
+app.put('/users/:userId/addresses/:addressId', async (c) => {
+  const userId = Number(c.req.param('userId'));
+  const addressId = Number(c.req.param('addressId'));
+  if (isNaN(userId) || isNaN(addressId)) return c.json({ error: 'Invalid ID' }, 400);
+  
+  // Verify ownership
+  const [addr] = await sql`SELECT id FROM addresses WHERE id = ${addressId} AND user_id = ${userId}`;
+  if (!addr) return c.json({ error: 'Address not found or does not belong to user' }, 404);
+  
+  try {
+    const body = schemas.addressUpdate.parse(await c.req.json());
+    const [updated] = await sql`
+      UPDATE addresses SET
+        address_line = COALESCE(NULLIF(${body.address_line}, ''), address_line),
+        city = COALESCE(NULLIF(${body.city}, ''), city),
+        state = COALESCE(NULLIF(${body.state}, ''), state),
+        postal_code = COALESCE(NULLIF(${body.postal_code}, ''), postal_code),
+        country = COALESCE(NULLIF(${body.country}, ''), country)
+      WHERE id = ${addressId} AND user_id = ${userId}
+      RETURNING *
+    `;
+    return c.json(updated);
+  } catch (e) {
+    return c.json({ error: 'Invalid update data' }, 400);
+  }
+});
+
+// ================= 4️⃣ DELETE ADDRESS =================
+app.delete('/users/:userId/addresses/:addressId', async (c) => {
+  const userId = Number(c.req.param('userId'));
+  const addressId = Number(c.req.param('addressId'));
+  if (isNaN(userId) || isNaN(addressId)) return c.json({ error: 'Invalid ID' }, 400);
+  
+  const [deleted] = await sql`
+    DELETE FROM addresses 
+    WHERE id = ${addressId} AND user_id = ${userId} 
+    RETURNING id
+  `;
+  if (!deleted) return c.json({ error: 'Address not found or does not belong to user' }, 404);
+  return c.json({ message: 'Address deleted successfully' });
+});
+
+// ================= 5️⃣ COUNT ADDRESSES =================
+app.get('/users/addresses/count', async (c) => {
+  const counts = await sql`
+    SELECT u.name, COUNT(a.id)::int as address_count
+    FROM users u LEFT JOIN addresses a ON u.id = a.user_id
+    GROUP BY u.id, u.name ORDER BY address_count DESC
+  `;
+  return c.json(counts);
+});
+
+// ================= 6️⃣ USERS WITHOUT ADDRESSES =================
+app.get('/users/without-addresses', async (c) => {
   const users = await sql`
-    SELECT id, name, email, created_at FROM users ORDER BY id DESC
+    SELECT u.name, 0::int as address_count
+    FROM users u
+    WHERE NOT EXISTS (SELECT 1 FROM addresses a WHERE a.user_id = u.id)
+    ORDER BY u.created_at DESC
   `;
   return c.json(users);
 });
 
-// 3. GET /users/:id - READ ONE
-app.get('/users/:id', async (c) => {
-  const id = Number(c.req.param('id'));
-  if (isNaN(id) || id <= 0) {
-    return c.json({ error: 'Invalid user ID' }, 400);
-  }
-  
-  const rows = await sql`
-    SELECT id, name, email, created_at FROM users WHERE id = ${id}
-  `;
-  if (rows.length === 0) return c.json({ error: 'User not found' }, 404);
-  return c.json(rows[0]);
-});
-
-// 4. PUT /users/:id - UPDATE
-app.put('/users/:id', async (c) => {
-  const id = Number(c.req.param('id'));
-  if (isNaN(id) || id <= 0) {
-    return c.json({ error: 'Invalid user ID' }, 400);
-  }
-  
+// ================= BASIC USER ROUTES =================
+app.post('/users', async (c) => {
   try {
-    const body = await validateUserUpdate(await c.req.json());
-    
-    let passwordHash = body.password;
-    if (body.password) {
-      passwordHash = await bcrypt.hash(body.password, 12);
-    }
-    
-    const rows = await sql`
-      UPDATE users 
-      SET 
-        name = COALESCE(${body.name ?? null}, name),
-        email = COALESCE(${body.email ?? null}, email),
-        password_hash = COALESCE(${passwordHash ?? null}, password_hash)
-      WHERE id = ${id}
+    const body = schemas.userCreate.parse(await c.req.json());
+    const passwordHash = await bcrypt.hash(body.password, 12);
+    const [user] = await sql`
+      INSERT INTO users (name, email, password_hash)
+      VALUES (${body.name}, ${body.email}, ${passwordHash})
       RETURNING id, name, email, created_at
     `;
-    if (rows.length === 0) return c.json({ error: 'User not found' }, 404);
-    return c.json(rows[0]);
-  } catch (err: any) {
-    if (err.code === '23505') return c.json({ error: 'Email already exists' }, 409);
-    if (err.status) return c.json({ error: err.message }, err.status);
-    return c.json({ error: 'Failed to update user' }, 500);
+    return c.json(user, 201);
+  } catch (e) {
+    return c.json({ error: 'Invalid user data' }, 400);
   }
 });
 
-// 5. DELETE /users/:id - DELETE
-app.delete('/users/:id', async (c) => {
-  const id = Number(c.req.param('id'));
-  if (isNaN(id) || id <= 0) {
-    return c.json({ error: 'Invalid user ID' }, 400);
-  }
-  
-  const rows = await sql`
-    DELETE FROM users WHERE id = ${id} RETURNING id, name, email, created_at
-  `;
-  if (rows.length === 0) return c.json({ error: 'User not found' }, 404);
-  return c.json({ message: 'User deleted successfully' });
-});
+app.get('/users', async (c) => c.json(await sql`SELECT id, name, email, created_at FROM users ORDER BY id DESC`));
 
-// 6. POST /login
-app.post('/login', async (c) => {
-  try {
-    const body = await validateLogin(await c.req.json());
-    
-    const rows = await sql`
-      SELECT id, name, email, password_hash FROM users WHERE email = ${body.email}
-    `;
-    
-    if (rows.length === 0) {
-      return c.json({ error: 'Invalid credentials' }, 401);
-    }
-    
-    const user = rows[0];
-    const valid = await bcrypt.compare(body.password, user.password_hash);
-    
-    if (!valid) {
-      return c.json({ error: 'Invalid credentials' }, 401);
-    }
-    
-    return c.json({ 
-      id: user.id, 
-      name: user.name, 
-      email: user.email,
-      message: 'Login successful'
-    });
-  } catch (err: any) {
-    if (err.status) return c.json({ error: err.message }, err.status);
-    return c.json({ error: 'Login failed' }, 500);
-  }
-});
-
-// ================= START SERVER =================
-const port = Number(process.env.PORT) || 3000;
+const port = Number(process.env.PORT) || 4000;
 serve({ fetch: app.fetch, port });
-console.log(`🚀 Server running on http://localhost:${port}`);
+console.log(`🚀 COMPLETE API on http://localhost:${port}`);
