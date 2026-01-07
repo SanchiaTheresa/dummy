@@ -3,82 +3,54 @@ import { Hono } from 'hono';
 import { serve } from '@hono/node-server';
 import sql from './db';
 import bcrypt from 'bcrypt';
-import { z } from 'zod';
+import {user, address, addressUpdate} from './schemas.js';  
 
 const app = new Hono();
 
-// ================= TYPES =================
-type User = { id: number; name: string; email: string; created_at: string };
-type Address = { id: number; user_id: number; address_line: string | null; city: string | null; state: string | null; postal_code: string | null; country: string | null; created_at: string };
-
-// ================= VALIDATION =================
-const schemas = {
-  userCreate: z.object({
-    name: z.string().min(2).max(100),
-    email: z.string().email(),
-    password: z.string().min(8).regex(/^(?=.*[a-z])(?=.*[A-Z])(?=.*\d)/)
-  }),
-  addressCreate: z.object({
-    address_line: z.string().min(5).max(200),
-    city: z.string().min(2).max(50),
-    state: z.string().min(2).max(50),
-    postal_code: z.string().min(4).max(10),
-    country: z.string().min(2).max(50)
-  }),
-  addressUpdate: z.object({
-    address_line: z.string().min(5).max(200).optional(),
-    city: z.string().min(2).max(50).optional(),
-    state: z.string().min(2).max(50).optional(),
-    postal_code: z.string().min(4).max(10).optional(),
-    country: z.string().min(2).max(50).optional()
-  }).passthrough()
-};
-
-// ================= 1️⃣ ADD ADDRESS =================
+//  ADD ADDRESS 
 app.post('/users/:userId/addresses', async (c) => {
   const userId = Number(c.req.param('userId'));
   if (isNaN(userId) || userId <= 0) return c.json({ error: 'Invalid user ID' }, 400);
   
-  const [user] = await sql`SELECT id FROM users WHERE id = ${userId}`;
-  if (!user) return c.json({ error: 'User not found' }, 404);
+  const [userExists] = await sql`SELECT id FROM users WHERE id = ${userId}`;
+  if (!userExists) return c.json({ error: 'User not found' }, 404);
   
   try {
-    const body = schemas.addressCreate.parse(await c.req.json());
-    const [address] = await sql`
+    const body = address.parse(await c.req.json());  
+    const [newAddress] = await sql`
       INSERT INTO addresses (user_id, address_line, city, state, postal_code, country)
       VALUES (${userId}, ${body.address_line}, ${body.city}, ${body.state}, ${body.postal_code}, ${body.country})
       RETURNING *
     `;
-    return c.json(address, 201);
+    return c.json(newAddress, 201);
   } catch (e) {
     return c.json({ error: 'Invalid address data' }, 400);
   }
 });
 
-// ================= 2️⃣ GET ADDRESSES =================
+// GET ADDRESSES
 app.get('/users/:userId/addresses', async (c) => {
   const userId = Number(c.req.param('userId'));
   if (isNaN(userId) || userId <= 0) return c.json({ error: 'Invalid user ID' }, 400);
   
-  const [user] = await sql`SELECT id FROM users WHERE id = ${userId}`;
-  if (!user) return c.json({ error: 'User not found' }, 404);
+  const [userExists] = await sql`SELECT id FROM users WHERE id = ${userId}`;
+  if (!userExists) return c.json({ error: 'User not found' }, 404);
   
   const addresses = await sql`SELECT * FROM addresses WHERE user_id = ${userId} ORDER BY created_at DESC`;
-  return c.json(addresses); // Empty array if none
+  return c.json(addresses);
 });
 
-// ================= 3️⃣ UPDATE ADDRESS =================
+//  UPDATE ADDRESS 
 app.put('/users/:userId/addresses/:addressId', async (c) => {
   const userId = Number(c.req.param('userId'));
   const addressId = Number(c.req.param('addressId'));
   if (isNaN(userId) || isNaN(addressId)) return c.json({ error: 'Invalid ID' }, 400);
   
-  // Verify ownership
   const [addr] = await sql`SELECT id FROM addresses WHERE id = ${addressId} AND user_id = ${userId}`;
   if (!addr) return c.json({ error: 'Address not found or does not belong to user' }, 404);
   
   try {
-    const body = schemas.addressUpdate.parse(await c.req.json());
+    const body = addressUpdate.parse(await c.req.json());  
     const [updated] = await sql`
       UPDATE addresses SET
         address_line = COALESCE(NULLIF(${body.address_line}, ''), address_line),
@@ -95,7 +67,7 @@ app.put('/users/:userId/addresses/:addressId', async (c) => {
   }
 });
 
-// ================= 4️⃣ DELETE ADDRESS =================
+//  DELETE ADDRESS 
 app.delete('/users/:userId/addresses/:addressId', async (c) => {
   const userId = Number(c.req.param('userId'));
   const addressId = Number(c.req.param('addressId'));
@@ -110,7 +82,7 @@ app.delete('/users/:userId/addresses/:addressId', async (c) => {
   return c.json({ message: 'Address deleted successfully' });
 });
 
-// ================= 5️⃣ COUNT ADDRESSES =================
+//  COUNT ADDRESSES 
 app.get('/users/addresses/count', async (c) => {
   const counts = await sql`
     SELECT u.name, COUNT(a.id)::int as address_count
@@ -120,7 +92,7 @@ app.get('/users/addresses/count', async (c) => {
   return c.json(counts);
 });
 
-// ================= 6️⃣ USERS WITHOUT ADDRESSES =================
+// USERS WITHOUT ADDRESSES 
 app.get('/users/without-addresses', async (c) => {
   const users = await sql`
     SELECT u.name, 0::int as address_count
@@ -131,17 +103,17 @@ app.get('/users/without-addresses', async (c) => {
   return c.json(users);
 });
 
-// ================= BASIC USER ROUTES =================
+//  USER ROUTES 
 app.post('/users', async (c) => {
   try {
-    const body = schemas.userCreate.parse(await c.req.json());
+    const body = user.parse(await c.req.json());  
     const passwordHash = await bcrypt.hash(body.password, 12);
-    const [user] = await sql`
+    const [newUser] = await sql`
       INSERT INTO users (name, email, password_hash)
       VALUES (${body.name}, ${body.email}, ${passwordHash})
       RETURNING id, name, email, created_at
     `;
-    return c.json(user, 201);
+    return c.json(newUser, 201);
   } catch (e) {
     return c.json({ error: 'Invalid user data' }, 400);
   }
