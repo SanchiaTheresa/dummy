@@ -22,6 +22,12 @@ export const addressUpdate= z.object({
   state: z.string().min(2).max(50).optional(),
   postal_code: z.string().min(4).max(10).optional(),
   country: z.string().min(2).max(50).optional()
-}) 
+}) ;
+export const createUserWithAddresses = z.object({
+  name: user.shape.name,
+  email: user.shape.email,
+  password: user.shape.password,
+  addresses: z.array(address).min(0).optional()
+}); 
 
 
