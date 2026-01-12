@@ -1,27 +1,35 @@
 import type { Context, Next } from 'hono';
 
 export const logger = async (c: Context, next: Next) => {
-  const start = Date.now();
-  const timestamp = new Date().toTimeString().slice(0, 8);
-  const method = c.req.method;
-  const url = new URL(c.req.url);
-  const path = url.pathname;
+  // 1. ARRIVAL: Record when the request hits the server
+  const startTime = Date.now();
+  const timeLabel = new Date().toTimeString().slice(0, 8); // e.g., "14:20:01"
   
-  // Sanitize query params
-  let queryParams = '';
-  const params = url.searchParams;
-  if (params.toString()) {
-    const sanitized: string[] = [];
-    for (const [key, value] of params) {
-      sanitized.push(key + '=' + (key.includes('password') ? '[REDACTED]' : value));
-    }
-    queryParams = `?${sanitized.join('&')}`;
+  const { method, url } = c.req;
+  const { pathname, searchParams } = new URL(url);
+
+  // 2. PRIVACY: Clean the URL query parameters
+  let cleanQuery = '';
+  if (searchParams.toString()) {
+    const pieces: string[] = [];
+    
+    // Check every item in the URL (?name=John&password=123)
+    searchParams.forEach((value, key) => {
+      const isSensitive = key.toLowerCase().includes('password');
+      const safeValue = isSensitive ? '[REDACTED]' : value;
+      pieces.push(`${key}=${safeValue}`);
+    });
+    
+    cleanQuery = `?${pieces.join('&')}`;
   }
-  
+
+  // 3. THE HANDOFF: Let the rest of the app do its work
   await next();
-  
-  const execTime = Date.now() - start;
-  const status = c.res.status || 200;
-  
-  console.log(`[${timestamp}] ${method} ${path}${queryParams} ${status} ${execTime}ms`);
+
+  // 4. SUMMARY: Calculate time and print the result
+  const duration = Date.now() - startTime;
+  const statusCode = c.res.status || 200;
+
+  // Final Log: [Time] METHOD PATH STATUS DURATION
+  console.log(`[${timeLabel}] ${method} ${pathname}${cleanQuery} ${statusCode} ${duration}ms`);
 };

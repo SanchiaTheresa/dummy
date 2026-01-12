@@ -1,5 +1,5 @@
 import 'dotenv/config';
-import { Hono } from 'hono';
+import { Context, Hono } from 'hono';
 import { serve } from '@hono/node-server';
 import sql from './db';
 import bcrypt from 'bcrypt';
@@ -7,14 +7,14 @@ import { user, address, addressUpdate } from './schemas';
 import { responseFormatter } from './middleware/responseFormatter';
 import type { ApiResponse } from './types';
 import { logger } from './middleware/logger'; 
-import { createUserWithAddresses } from './schemas';
+import{createUserWithAddresses} from './schemas';
 
-const app = new Hono();
+const app = new Hono(); //why it is used
 
-app.use('/*', logger); 
+app.use('/*', logger); //why use,/* 
 app.use('/*', responseFormatter);
 
-const setResponse = (c: any, data: any, message?: string, status = 200) => {
+const setResponse = (c:any, data: any, message?: string, status = 200) => { // js arrow function
   c.set('responseData', data);
   c.status(status);
   c.set('responseMessage', message || 'Operation successful');
@@ -25,41 +25,43 @@ const setResponse = (c: any, data: any, message?: string, status = 200) => {
   return c.json({ success: true, data, message }, status);
 };
 
-app.post('/users', async (c) => {
+const greet = () => ``
+
+app.post('/users', async (c) => {//what c,async
   try {
-    const body = user.parse(await c.req.json());
-    const passwordHash = await bcrypt.hash(body.password, 12);
+    const body = user.parse(await c.req.json()); //why using parse
+    const passwordHash = await bcrypt.hash(body.password, 12); // why used
     
-    const [newUser] = await sql`
+    const [newUser] = await sql`  
       INSERT INTO users (name, email, password_hash)
-      VALUES (${body.name}, ${body.email}, ${passwordHash})
+      VALUES (${body.name}, ${body.email}, ${passwordHash}) 
       RETURNING id, name, email, created_at
-    `;
+    `;//why $ {} ` is used
     
-    setResponse(c, newUser, 'User created successfully', 201);
+    setResponse(c, newUser, 'User created successfully', 201);  //why 201 and 200 what the difference 
   } catch (error: any) {
-    c.set('responseMessage', error.message || 'Invalid user data');
+    c.set('responseMessage', error.message || 'Invalid user data');// why c.set and 
     c.status(400);
   }
 });
 
-app.get('/users', async (c) => {
+app.get('/users', async (c) => {//learn about req and res
   try {
     const users = await sql`SELECT id, name, email, created_at FROM users ORDER BY id DESC`;
     setResponse(c, users);
   } catch {
     c.set('responseMessage', 'Failed to fetch users');
-    c.status(500);
+    c.status(500);  
   }
 });
 
-app.post('/users/:userId/addresses', async (c) => {
+app.post('/users/:userId/addresses', async (c) => {//:userId and ?= used
   const userId = Number(c.req.param('userId'));
   if (isNaN(userId) || userId <= 0) {
-  return setResponse(c, null, 'Invalid user ID', 400);
+  return setResponse(c, null, 'Invalid user ID', 400);//wht null used
   }
   
-  const [userExists] = await sql`SELECT id FROM users WHERE id = ${userId}`;
+  const [userExists] = await sql`SELECT id FROM users WHERE id = ${userId}`;  //
 if (!userExists) {
     return setResponse(c, null, 'User not found', 404);
   }
@@ -74,7 +76,7 @@ if (!userExists) {
     
     setResponse(c, newAddress, 'Address created successfully', 201);
   } catch (error: any) {
-    c.set('responseMessage', error.message || 'Invalid address data');
+    c.set('responseMessage', error.message || 'Invalid address data');  
     c.status(400);
   }
 });
@@ -119,7 +121,7 @@ if (isNaN(userId) || userId <= 0) {
         country = COALESCE(NULLIF(${body.country}, ''), country)
       WHERE id = ${addressId} AND user_id = ${userId}
       RETURNING *
-    `;
+    `;//SET ,COALESCE NULLIF, RETURNING *
     
     setResponse(c, updated);
   } catch (error: any) {
@@ -153,7 +155,7 @@ app.get('/users/addresses/count', async (c) => {
     SELECT u.name, COUNT(a.id)::int as address_count
     FROM users u LEFT JOIN addresses a ON u.id = a.user_id
     GROUP BY u.id, u.name ORDER BY address_count DESC
-  `;
+  `;//LEFT JOIN
   setResponse(c, counts);
 });
 
@@ -177,7 +179,7 @@ app.post('/users/with-addresses', async (c) => {
     
     const passwordHash = await bcrypt.hash(body.password, 12);
     
-    await sql`BEGIN`;
+    await sql`BEGIN`; // why bwgin and why commit
     
     try {
       const [newUser] = await sql`
@@ -186,20 +188,20 @@ app.post('/users/with-addresses', async (c) => {
         RETURNING id, name, email, created_at
       `;
       
-     const addresses = parsed.data.addresses || [];
-      const createdAddresses = [];
+     const addresses = parsed.data.addresses || [];//what is this
+      const createdAddresses = []; //const ,let ,var,[]
    
       
-      for (const addr of addresses) {
+      for (const addr of addresses) { //what is this
         const [newAddr] = await sql`
           INSERT INTO addresses (user_id, address_line, city, state, postal_code, country)
           VALUES (${newUser.id}, ${addr.address_line}, ${addr.city}, ${addr.state}, ${addr.postal_code}, ${addr.country})
           RETURNING *
         `;
-        createdAddresses.push(newAddr);
+        createdAddresses.push(newAddr); 
       }
       
-      await sql`COMMIT`;
+      await sql`COMMIT`; 
       
       return setResponse(c, {
         user: newUser,
@@ -207,7 +209,7 @@ app.post('/users/with-addresses', async (c) => {
       }, 'User and addresses created successfully', 201);
       
    } catch (dbError) {
-      await sql`ROLLBACK`;
+      await sql`ROLLBACK`;//why rollback
       console.error('DB Error:', dbError);
       return setResponse(c, null, 'Database transaction failed', 500);
     }
@@ -220,4 +222,4 @@ app.post('/users/with-addresses', async (c) => {
 
 const port = Number(process.env.PORT) || 4000;
 serve({ fetch: app.fetch, port });
-console.log(`Server running on http://localhost:${port}`);
+console.log(`Server running on http://localhost:${port}`); //
